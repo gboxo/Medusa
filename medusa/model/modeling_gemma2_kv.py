@@ -52,7 +52,7 @@ from transformers.utils import (
     logging,
     replace_return_docstrings,
 )
-from transformers.configuration_gemma2 import Gemma2Config
+from transformers.models.gemma2.configuration_gemma2 import Gemma2Config
 
 
 if is_flash_attn_2_available():
