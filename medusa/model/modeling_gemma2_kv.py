@@ -825,13 +825,48 @@ class Gemma2Model(Gemma2PreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
+    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
+        # create causal mask
+        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = _make_causal_mask(
+                input_shape,
+                inputs_embeds.dtype,
+                device=inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+
+        if attention_mask is not None:
+            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+            expanded_attn_mask = _expand_mask(attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]).to(
+                inputs_embeds.device
+            )
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+
+        # [MODIFIED] add medusa mask
+        if hasattr(self, "medusa_mask") and self.medusa_mask is not None:
+            medusa_mask = self.medusa_mask
+            medusa_len = medusa_mask.size(-1)
+            combined_attention_mask[:, :, -medusa_len:, -medusa_len:][
+                medusa_mask == 0
+            ] = combined_attention_mask.min()
+            if hasattr(self, "medusa_mode"):
+                # debug mode
+                if self.medusa_mode == "debug":
+                    torch.save(combined_attention_mask, "medusa_mask.pt")
+
+        return combined_attention_mask
+
     @add_start_docstrings_to_model_forward(GEMMA2_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[HybridCache] = None,
+        past_key_values = None, #[MODIFIED] past_key_value is KVCache class
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
@@ -877,10 +912,13 @@ class Gemma2Model(Gemma2PreTrainedModel):
         if position_ids is None:
             position_ids = cache_position.unsqueeze(0)
 
-        causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_key_values, output_attentions
-        )
 
+        causal_mask = self._prepare_decoder_attention_mask(
+            attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
+        )
+        # [MODIFIED] 
+        self.causal_mask = causal_mask
+        self.position_ids = position_ids
         # embed positions
         hidden_states = inputs_embeds
 
