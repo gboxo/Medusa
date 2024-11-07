@@ -1,5 +1,7 @@
 # %%
 from medusa.model.modeling_gemma2_kv import Gemma2ForCausalLM as KVGemma2ForCausalLM
+from medusa.model.medusa_choices import mc_sim_7b_63
+from transformers import AutoModelForCausalLM
 
 
 # %%
@@ -224,7 +226,7 @@ class MedusaModel(nn.Module):
         posterior_threshold=0.09,  # threshold validation of Medusa output
         # another threshold hyperparameter, recommended to be sqrt(posterior_threshold)
         posterior_alpha=0.3,
-    ):
+        ):
         """
         Args:
             input_ids (torch.Tensor, optional): Input token IDs.
@@ -453,7 +455,7 @@ class TrainingArguments(transformers.TrainingArguments):
         },
     )
     medusa_num_heads: int = field(
-        default=1,
+        default=3,
         metadata={"help": "Number of Medusa heads."},
     )
     medusa_num_layers: int = field(
@@ -657,9 +659,9 @@ def train():
     if orig_ctx_len and training_args.model_max_length > orig_ctx_len:
         scaling_factor = float(math.ceil(training_args.model_max_length / orig_ctx_len))
         config.rope_scaling = {"type": "linear", "factor": scaling_factor}
-    config.use_cache = False
+    config.use_cache = True
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
@@ -674,7 +676,7 @@ def train():
     print(tokenizer.apply_chat_template([{"role": "user", "content": "This is a test"}]))
 
     # Load model and tokenizer
-    model = transformers.AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         config=config,
         cache_dir=training_args.cache_dir,
@@ -746,49 +748,10 @@ def train():
 
 # %%
 
-
 # %%
-from huggingface_hub import notebook_login
-notebook_login()
-import warnings
 
-# %%
-model_name = 'google/gemma-2-2b-it'
-
-config = AutoConfig.from_pretrained(model_name)
-
-
-# %%
-model = KVGemma2ForCausalLM.from_pretrained(model_name)
-
-# %%
-# Freeze the base model
-for param in model.base_model.parameters():
-    param.requires_grad = False
-
-# Add Medusa heads
-medusa_lm_head = MedusaModel(
-    model,
-    medusa_num_heads=3,
-    medusa_num_layers=1,
-    base_model_name_or_path=model_name,
-)
-
-# %%
-# Format output dir
-from medusa.train.train_legacy import *
-# Load data
-data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-
-# Generate Medusa config for pushing to HF hub
-medusa_config = MedusaConfig(
-    medusa_num_heads=training_args.medusa_num_heads,
-    medusa_num_layers=training_args.medusa_num_layers,
-    base_model_name_or_path=model_args.model_name_or_path,
-    version="2"
-)
-
-# %%
+if __name__ == "__main__":
+    train()
 
 
 
