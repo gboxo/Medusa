@@ -363,7 +363,7 @@ IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
 # Customized for training Medusa heads
 class CustomizedTrainer(Trainer):
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs,num_items_in_batch=None, return_outputs=False):
         """
         Compute the training loss for the model.
 
@@ -449,7 +449,7 @@ class TrainingArguments(transformers.TrainingArguments):
     report_to: Optional[str] = None
     optim: str = field(default="adamw_torch")
     model_max_length: int = field(
-        default=2048,
+        default=512,
         metadata={
             "help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
         },
@@ -472,7 +472,7 @@ def rank0_print(*args):
         print(*args)
 
 
-def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str):
+def safe_save_model_for_hf_trainer(trainer: Trainer, output_dir: str):
     """
     Save the model's state dictionary to a specified directory.
 
@@ -505,6 +505,21 @@ def preprocess(
     conversations = []
     prompts = []
     # # import pdb; pdb.set_trace()
+    sources_mod = []
+    for elem in sources:
+        l = []
+        for e in elem["conversations"]:
+            d = {}
+            d["role"] = "user" if e["from"]=="human" else "model"
+            d["content"] = e["value"]
+            l.append(d)
+        sources_mod.append(l)
+    sources = sources_mod
+
+
+
+
+
     for i, conversation in enumerate(sources):
         prompt = tokenizer.apply_chat_template(conversation, tokenize=False)
         prompts.append(prompt)
@@ -526,7 +541,7 @@ def preprocess(
     for conv_index, (conversation, target, prompt) in enumerate(zip(conversations, targets, prompts)):
 
         for turn in conversation:
-            if turn["role"] == "assistant":
+            if turn["role"] == "model":
                 content = turn["content"]
                 # Unfortunate strip() necessary because chat templates are doing the same.
                 start = prompt.index(content.strip())
@@ -629,7 +644,15 @@ def make_supervised_data_module(
     )
     rank0_print("Loading data...")
 
-    train_json = json.load(open(data_args.data_path, "r"))
+    #train_json = json.load(open(data_args.data_path, "r"))
+    train_json = []
+    with open(data_args.data_path) as f:
+        for line in f:
+            try:
+                train_json.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                print("Error")
+
     train_dataset = dataset_cls(train_json, tokenizer=tokenizer)
 
     if data_args.eval_data_path:
@@ -651,7 +674,7 @@ def train():
     local_rank = training_args.local_rank
 
     # Set RoPE scaling factor
-    config = transformers.AutoConfig.from_pretrained(
+    config = AutoConfig.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
     )
@@ -707,7 +730,7 @@ def train():
         medusa_num_heads=training_args.medusa_num_heads,
         medusa_num_layers=training_args.medusa_num_layers,
         base_model_name_or_path=model_args.model_name_or_path,
-        version="2"
+        version="1"
     )
 
     # Save Medusa config
@@ -722,7 +745,7 @@ def train():
         trainer.train(resume_from_checkpoint=True)
     else:
         trainer.train()
-    model.config.use_cache = True
+    model.config.use_cache = False
     # trainer.save_state()
     # safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
     # Save MedusaHead seperately
