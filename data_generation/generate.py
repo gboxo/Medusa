@@ -35,6 +35,7 @@ for i in range(10):
     except:
         break
 
+api_base_pool = ["http://localhost:8000/v1"]
 print("API base pool: ", api_base_pool)
 
 parser = argparse.ArgumentParser()
@@ -108,6 +109,7 @@ def generate_data(messages, idx):
                 f.write(json.dumps({"conversations": output_messages}) + "\n")
         else:
             conv = get_conversation_template(model_name)
+            conv.messages = []
             if messages[0]["from"] == "system":
                 conv.system_message = messages[0]["text"]
                 messages = messages[1:]
